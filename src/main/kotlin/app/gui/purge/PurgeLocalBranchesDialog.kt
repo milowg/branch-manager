@@ -1,21 +1,15 @@
-package app.gui
+package app.gui.purge
 
 import app.ProjectUtil
-import app.gui.purge.GitRepoInfo
-import app.gui.purge.MultiReposBranchesTableModel
-import app.gui.purge.SingleRepoBranchesTableModel
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
 import com.intellij.util.ui.JBUI
-import git4idea.GitUsagesTriggerCollector.Companion.reportUsage
 import git4idea.branch.GitBrancher
-import javax.swing.JComboBox
-import javax.swing.JComponent
-import javax.swing.JPanel
-import javax.swing.JTable
+import javax.swing.*
+import javax.swing.table.TableRowSorter
 
 class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(project) {
 
@@ -30,8 +24,8 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
     private lateinit var branchesTable: JTable
     private lateinit var projectsComboBox: JComboBox<GitRepoInfo>
 
-    private val singleRepoBranchesTableModel = SingleRepoBranchesTableModel()
-    private val multiReposBranchesTableModel = MultiReposBranchesTableModel()
+    private val singleRepoModel = SingleRepoBranchesTableModel()
+    private val multiReposModel = MultiReposBranchesTableModel()
 
     init {
         title = "Purge local branches"
@@ -71,7 +65,8 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
     }
 
     private fun showMultiRepoBranchesTable() {
-        branchesTable.model = multiReposBranchesTableModel
+        branchesTable.model = multiReposModel
+        branchesTable.autoCreateRowSorter = true
         branchesTable.rowHeight = JBUI.scale(22)
 
         val columnModel = branchesTable.columnModel
@@ -83,11 +78,19 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
         repoColumn.headerValue = "Repository"
         repoColumn.maxWidth = 250
 
-        multiReposBranchesTableModel.showBranches(project)
+        val branchColumn = columnModel.getColumn(2)
+        branchColumn.headerValue = "Branch"
+        branchColumn.maxWidth = 350
+
+        multiReposModel.showBranches(project)
     }
 
     private fun showSingleRepoBranchesTable(gitRepoInfo: GitRepoInfo) {
-        branchesTable.model = singleRepoBranchesTableModel
+        val singleRepoModelSorter = TableRowSorter(singleRepoModel)
+        singleRepoModelSorter.sortKeys = listOf(RowSorter.SortKey(1, SortOrder.ASCENDING))
+
+        branchesTable.model = singleRepoModel
+        branchesTable.rowSorter = singleRepoModelSorter
         branchesTable.rowHeight = JBUI.scale(22)
 
         val columnModel = branchesTable.columnModel
@@ -98,7 +101,7 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
         val branchColumn = columnModel.getColumn(1)
         branchColumn.headerValue = "Branch"
 
-        singleRepoBranchesTableModel.showBranches(gitRepoInfo)
+        singleRepoModel.showBranches(gitRepoInfo)
     }
 
     override fun createCenterPanel(): JComponent? {
@@ -109,9 +112,9 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
         val deleteLocalBranchesRes = MessageDialogBuilder.yesNo(
                 "Delete local branches",
                 "Are you sure to delete local branches?"
-        ).noText("Cancel").show()
+        ).noText("Cancel").ask(project)
 
-        if (deleteLocalBranchesRes == Messages.YES) {
+        if (deleteLocalBranchesRes) {
             deleteLocalBranches(projectsComboBox.selectedItem as GitRepoInfo)
             // close parent dialog
             super.doOKAction()
@@ -122,11 +125,11 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
         val gitBrancher = GitBrancher.getInstance(project)
 
         if (gitRepoInfo.name == ALL_REPO) {
-            multiReposBranchesTableModel.getSelectedBranches(project).forEach { k, v ->
+            multiReposModel.getSelectedBranches(project).forEach { k, v ->
                 deleteBranch(gitBrancher, k, v)
             }
         } else {
-            singleRepoBranchesTableModel.getSelectedBranches().forEach {
+            singleRepoModel.getSelectedBranches().forEach {
                 deleteBranch(gitBrancher, gitRepoInfo, it)
             }
         }
@@ -135,7 +138,6 @@ class PurgeLocalBranchesDialog(private val project: Project) : DialogWrapper(pro
     private fun deleteBranch(gitBrancher: GitBrancher, gitRepoInfo: GitRepoInfo, vararg branches: String) {
         branches.forEach {
             gitBrancher.deleteBranch(it, mutableListOf(gitRepoInfo.gitRepo))
-            reportUsage(project, "git.branch.delete.local")
         }
     }
 
